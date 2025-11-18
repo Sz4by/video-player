@@ -1,0 +1,12 @@
+{
+  "name": "video-player-wrapper",
+  "version": "1.0.0",
+  "description": "Custom URL player using Node.js/Express.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
