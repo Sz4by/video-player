@@ -1,18 +1,20 @@
 const express = require('express');
 const app = express();
-// Render a PORT környezeti változót használja
+// Render a PORT környezeti változót fogja használni
 const port = process.env.PORT || 3000; 
 
-// Útvonal kezelése: /link/ utáni bármilyen URL-t elfog
+// Útvonal kezelése: /link/ utáni bármilyen URL-t elfog (a .htaccess-t helyettesíti)
 app.get('/link/*', (req, res) => {
-    // A teljes videó link kinyerése a címsorból
+    // Kinyeri a teljes videó linket a kérés útvonalából
+    // A [0] index a /link/ utáni teljes részt tartalmazza, pl.: https://ok6-29.vkuser.net/...
     const fullVideoLink = req.params[0];
 
+    // Ellenőrzés
     if (!fullVideoLink || !fullVideoLink.startsWith('http')) {
         return res.status(400).send("Hiba: Kérem adja meg a teljes videó linket a /link/ után, 'http'-vel kezdve.");
     }
 
-    // HTML5 lejátszó generálása (a te képernyőképed szerint)
+    // HTML5 lejátszó generálása (a te képernyőképed szerint, minimalista stílussal)
     const htmlResponse = `
     <!DOCTYPE html>
     <html>
@@ -46,7 +48,13 @@ app.get('/link/*', (req, res) => {
     res.send(htmlResponse);
 });
 
-// A szerver elindítása
+// Főoldal (alapértelmezett oldal)
+app.get('/', (req, res) => {
+    res.send('A lejátszó a /link/ utan adando URL-t várja. Példa: /link/https://videolink.mp4');
+});
+
+
+// A JAVÍTOTT RÉSZ: A Template String backtick-kel (`) van írva.
 app.listen(port, () => {
-  console.log(\`A szerver fut a \${port} porton\`);
+  console.log(`A szerver fut a ${port} porton`); 
 });
