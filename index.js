@@ -4,12 +4,13 @@ const path = require('path');
 const http = require('http');
 const { URL } = require('url');
 const WebSocket = require('ws');
-const fs = require('fs'); // <-- ÚJ: fájlok olvasásához
+// Ezt a fájlimportot most nem használjuk, de bent hagyjuk a biztonság kedvéért:
+// const fs = require('fs'); 
 
 // --- BIZTONSÁGI KULCS ---
 const BOT_SECRET_KEY = process.env.BOT_SECRET_KEY;
 if (!BOT_SECRET_KEY) {
-    console.warn('FIGYELEM: A BOT_SECRET_KEY nincs beállítva! A bot nem fog tudni csatlakozni.');
+    console.warn('FIGYELEM: A BOT_SECRET_KEY nincs beállítva!');
 }
 
 const app = express();
@@ -17,23 +18,12 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const port = process.env.PORT || 3000;
 
-// Segédfüggvény a HTML fájl szinkron olvasásához
-function getHtmlFile(filePath) {
-    return new Promise((resolve, reject) => {
-        fs.readFile(filePath, 'utf8', (err, data) => {
-            if (err) return reject(err);
-            resolve(data);
-        });
-    });
-}
-
-// --- A PROXY RÉSZ (Változatlan) ---
+// --- A PROXY RÉSZ (Változatlan, de szükséges a VK linkekhez) ---
 app.get('/proxy', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('Hiányzó "url" paraméter');
     const isManifest = videoUrl.includes('.m3u8') || videoUrl.includes('.txt');
     
-    // URL ellenőrzés és alapértelmezett Referer beállítása
     let origin;
     try {
         origin = new URL(videoUrl).origin;
@@ -51,25 +41,21 @@ app.get('/proxy', async (req, res) => {
             headers: headers, maxRedirects: 0, validateStatus: (status) => (status >= 200 && status < 400)
         });
         
-        // 3xx átirányítás kezelése
         if (response.status >= 300 && response.status < 400 && response.headers.location) {
             let redirectUrl = response.headers.location;
             if (redirectUrl.startsWith('/')) redirectUrl = `${origin}${redirectUrl}`;
             response = await axios.get(redirectUrl, { responseType: isManifest ? 'text' : 'stream', headers: headers });
         }
         
-        // Fejlécek beállítása és CORS engedélyezése
         res.setHeader('Content-Type', response.headers['content-type']);
         res.setHeader('Access-Control-Allow-Origin', '*');
         
         if (isManifest) {
-            // M3U8 listában a relatív útvonalakat proxy linkekre cseréljük
             let manifest = response.data.replace(/^(?!#)(.*)$/gm, (match) => 
                 `/proxy?url=${encodeURIComponent(new URL(match, videoUrl).href)}`
             );
             res.send(manifest);
         } else {
-            // Sima fájl streamelése
             response.data.pipe(res);
         }
     } catch (error) {
@@ -78,63 +64,91 @@ app.get('/proxy', async (req, res) => {
     }
 });
 
-// --- A WEBOLDAL KISZOLGÁLÁSA ÉS DEEP-LINK ÚTVONALAK ---
-
-// 1. A főoldal változatlan (manuális beillesztés)
+// --- 1. ÚTVONAL: A FŐOLDAL (HTML ŰRLAP) KISZOLGÁLÁSA ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 2. ÚJ DEEP-LINK ÚTVONAL: /link/https://videolink.mp4
-app.get('/link/*', async (req, res) => {
-    try {
-        const fullVideoLink = req.params[0];
-        if (!fullVideoLink || !fullVideoLink.startsWith('http')) {
-            return res.status(400).send("Hiányzó vagy érvénytelen videó link a /link/ után.");
-        }
+// --- 2. ÚTVONAL: DEEP-LINK /link/ (MINIMALISTA LEJÁTSZÓ GENERÁLÁSA) ---
+app.get('/link/*', (req, res) => {
+    const fullVideoLink = req.params[0];
 
-        let htmlContent = await getHtmlFile(path.join(__dirname, 'index.html'));
-
-        // Dinamikus Javascript kód befecskendezése az autó-lejátszáshoz
-        const autoPlayScript = `
-        <script>
-            // Ide illesztjük be a videó linkjét
-            const DEEP_LINK_URL = '${fullVideoLink.replace(/'/g, "\\'")}';
-            
-            // Az onload esemény figyeli a DOM betöltését
-            window.onload = function() {
-                // Az input mezőbe illesztés (hogy látszódjon a link)
-                document.getElementById('url').value = DEEP_LINK_URL;
-                // A proxy alapértelmezett BEKAPCSOLÁSA a CORS/VK problémák miatt
-                document.getElementById('proxy-toggle').checked = true; 
-                // Lejátszás indítása
-                playVideo();
-            };
-        </script>
-        </body>`;
-
-        // A bezáró </body> tag cseréje a scripttel
-        htmlContent = htmlContent.replace('</body>', autoPlayScript);
-
-        res.send(htmlContent);
-
-    } catch (error) {
-        console.error('Hiba történt a deep-link feldolgozásakor:', error);
-        res.status(500).send('Hiba történt a lejátszó generálásakor.');
+    if (!fullVideoLink || !fullVideoLink.startsWith('http')) {
+        return res.status(400).send("Hiányzó vagy érvénytelen videó link a /link/ után.");
     }
+    
+    // Ide illeszthetjük be a proxy-t is, ha a felhasználó akarja, de a kérés az volt, hogy ne legyen.
+    // Mivel a VK linkek működtek proxy nélkül, használjuk a direkt linket.
+    const finalSrc = fullVideoLink; 
+
+    // Minimalista HTML generálása (csak a videó és a fekete háttér)
+    const minimalHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Lejátszás - Szaby</title>
+        <style>
+            /* A fekete háttér és a teljes képernyős videó biztosítása */
+            body { 
+                background-color: #000; 
+                margin: 0; 
+                display: flex; 
+                justify-content: center; 
+                align-items: center; 
+                height: 100vh;
+                width: 100vw;
+                overflow: hidden; /* Ne legyen görgetés */
+            }
+            video { 
+                max-width: 100%; 
+                max-height: 100vh;
+            }
+            video:focus, video:active { outline: none; border: none; }
+        </style>
+    </head>
+    <body>
+        <video id="videoPlayer" controls autoplay src="${finalSrc}"></video>
+        
+        <script>
+            const video = document.getElementById('videoPlayer');
+            
+            // Az autoplay-t a böngésző tiltja hanggal. 
+            // A videót megkíséreljük teljes képernyőre tenni, amihez kattintás szükséges:
+            // FIGYELEM: A böngésző biztonsági okokból CSAK felhasználói interakció (kattintás) után engedi a Fullscreen API-t!
+            video.addEventListener('loadeddata', () => {
+                 video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
+            });
+
+            // Ezt megpróbálhatjuk, de a sikerhez kell egy kattintás (a felhasználónak):
+            document.documentElement.requestFullscreen().catch(e => {
+                console.log("A teljes képernyő kérés blokkolva van. Kattintson a videóra a váltáshoz.");
+            });
+            
+            // Hogy a teljes képernyő gomb könnyen elérhető legyen:
+            video.onplaying = function() {
+                // A lejátszás elindult, megpróbáljuk beállítani a fullscreent
+                if (video.requestFullscreen) {
+                    //video.requestFullscreen(); // Ezt a kódot a böngésző nagy valószínűséggel blokkolja.
+                }
+            };
+
+        </script>
+    </body>
+    </html>
+    `;
+    res.send(minimalHtml);
 });
 
 
-// --- WEBSOCKET "RÁDIÓTORONY" (Változatlan) ---
+// --- WEBSOCKET RÉSZ (Változatlan) ---
 const webClients = new Set(); 
 let authenticatedBot = null; 
-
 wss.on('connection', (ws) => {
     // ... (wss.on('connection') logika változatlan)
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            
+            // ... (BOT AUTH és PLAY_VIDEO logika változatlan)
             if (data.type === 'AUTH' && data.secret === BOT_SECRET_KEY) {
                 console.log('Discord Bot sikeresen hitelesítve és csatlakozva.');
                 authenticatedBot = ws;
@@ -171,7 +185,8 @@ wss.on('connection', (ws) => {
     }
 });
 
+
 // --- SZERVER INDÍTÁSA ---
 server.listen(port, () => {
-    console.log(`Szaby Lejátszó központ (Web+Proxy+WebSocket) elindult a ${port} porton`);
+    console.log(`Szaby Lejátszó központ elindult a ${port} porton`);
 });
