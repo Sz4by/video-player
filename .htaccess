@@ -1,0 +1,3 @@
+RewriteEngine On
+# Ez a szabály átírja a /link/BÁRMI kérést a index.php?video_url=BÁRMI formára
+RewriteRule ^link/(.*)$ index.php?video_url=$1 [L,QSA]
