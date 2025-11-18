@@ -1,12 +1,13 @@
 {
-  "name": "video-player-wrapper",
+  "name": "hls-proxy-player-hub",
   "version": "1.0.0",
-  "description": "Custom URL player using Node.js/Express.",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "axios": "^1.7.2",
+    "ws": "^8.17.0"
   }
 }
