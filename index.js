@@ -4,8 +4,7 @@ const path = require('path');
 const http = require('http');
 const { URL } = require('url');
 const WebSocket = require('ws');
-// Ezt a fájlimportot most nem használjuk, de bent hagyjuk a biztonság kedvéért:
-// const fs = require('fs'); 
+const fs = require('fs');
 
 // --- BIZTONSÁGI KULCS ---
 const BOT_SECRET_KEY = process.env.BOT_SECRET_KEY;
@@ -18,7 +17,51 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const port = process.env.PORT || 3000;
 
-// --- A PROXY RÉSZ (Változatlan, de szükséges a VK linkekhez) ---
+// ---------------------------------------------------------------------
+// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY ---
+// ---------------------------------------------------------------------
+
+// Létrehozza a fekete hátterű, videót tartalmazó HTML oldalt
+function generateMinimalPlayerHtml(finalSrc, res) {
+    if (!finalSrc || !finalSrc.startsWith('http')) {
+        return res.status(400).send("Hiányzó vagy érvénytelen videó link az útvonal után.");
+    }
+    
+    const minimalHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Lejátszás - Szaby</title>
+        <style>
+            body { 
+                background-color: #000; margin: 0; display: flex; 
+                justify-content: center; align-items: center; 
+                height: 100vh; width: 100vw; overflow: hidden;
+            }
+            video { max-width: 100%; max-height: 100vh; }
+            video:focus, video:active { outline: none; border: none; }
+        </style>
+    </head>
+    <body>
+        <video id="videoPlayer" controls autoplay src="${finalSrc}"></video>
+        <script>
+            const video = document.getElementById('videoPlayer');
+            video.addEventListener('loadeddata', () => {
+                 video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
+            });
+            // Hogy a teljes képernyő gomb könnyen elérhető legyen a videó vezérlőkkel:
+            // document.documentElement.requestFullscreen().catch(e => { ... }); 
+        </script>
+    </body>
+    </html>
+    `;
+    res.send(minimalHtml);
+}
+
+// ---------------------------------------------------------------------
+// --- A PROXY RÉSZ (CORS/Referer kikerülése) ---
+// ---------------------------------------------------------------------
+
 app.get('/proxy', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('Hiányzó "url" paraméter');
@@ -64,91 +107,42 @@ app.get('/proxy', async (req, res) => {
     }
 });
 
-// --- 1. ÚTVONAL: A FŐOLDAL (HTML ŰRLAP) KISZOLGÁLÁSA ---
+// ---------------------------------------------------------------------
+// --- ÚTVONALAK ÉS ROUTING ---
+// ---------------------------------------------------------------------
+
+// 1. A FŐOLDAL (HTML ŰRLAP) KISZOLGÁLÁSA
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- 2. ÚTVONAL: DEEP-LINK /link/ (MINIMALISTA LEJÁTSZÓ GENERÁLÁSA) ---
-app.get('/link/*', (req, res) => {
+// 2. ÚTVONAL: PROXY NÉLKÜL (Direkt lejátszáshoz)
+// Formátum: https://[RENDER CÍMED]/direct-link/https://videolink.mp4
+app.get('/direct-link/*', (req, res) => {
     const fullVideoLink = req.params[0];
-
-    if (!fullVideoLink || !fullVideoLink.startsWith('http')) {
-        return res.status(400).send("Hiányzó vagy érvénytelen videó link a /link/ után.");
-    }
-    
-    // Ide illeszthetjük be a proxy-t is, ha a felhasználó akarja, de a kérés az volt, hogy ne legyen.
-    // Mivel a VK linkek működtek proxy nélkül, használjuk a direkt linket.
-    const finalSrc = fullVideoLink; 
-
-    // Minimalista HTML generálása (csak a videó és a fekete háttér)
-    const minimalHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Lejátszás - Szaby</title>
-        <style>
-            /* A fekete háttér és a teljes képernyős videó biztosítása */
-            body { 
-                background-color: #000; 
-                margin: 0; 
-                display: flex; 
-                justify-content: center; 
-                align-items: center; 
-                height: 100vh;
-                width: 100vw;
-                overflow: hidden; /* Ne legyen görgetés */
-            }
-            video { 
-                max-width: 100%; 
-                max-height: 100vh;
-            }
-            video:focus, video:active { outline: none; border: none; }
-        </style>
-    </head>
-    <body>
-        <video id="videoPlayer" controls autoplay src="${finalSrc}"></video>
-        
-        <script>
-            const video = document.getElementById('videoPlayer');
-            
-            // Az autoplay-t a böngésző tiltja hanggal. 
-            // A videót megkíséreljük teljes képernyőre tenni, amihez kattintás szükséges:
-            // FIGYELEM: A böngésző biztonsági okokból CSAK felhasználói interakció (kattintás) után engedi a Fullscreen API-t!
-            video.addEventListener('loadeddata', () => {
-                 video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
-            });
-
-            // Ezt megpróbálhatjuk, de a sikerhez kell egy kattintás (a felhasználónak):
-            document.documentElement.requestFullscreen().catch(e => {
-                console.log("A teljes képernyő kérés blokkolva van. Kattintson a videóra a váltáshoz.");
-            });
-            
-            // Hogy a teljes képernyő gomb könnyen elérhető legyen:
-            video.onplaying = function() {
-                // A lejátszás elindult, megpróbáljuk beállítani a fullscreent
-                if (video.requestFullscreen) {
-                    //video.requestFullscreen(); // Ezt a kódot a böngésző nagy valószínűséggel blokkolja.
-                }
-            };
-
-        </script>
-    </body>
-    </html>
-    `;
-    res.send(minimalHtml);
+    generateMinimalPlayerHtml(fullVideoLink, res); 
 });
 
+// 3. ÚTVONAL: PROXYVAL (Korlátozott linkekhez)
+// Formátum: https://[RENDER CÍMED]/proxy-link/https://videolink.mp4
+app.get('/proxy-link/*', (req, res) => {
+    const fullVideoLink = req.params[0];
+    const proxiedSrc = `/proxy?url=${encodeURIComponent(fullVideoLink)}`; 
+    generateMinimalPlayerHtml(proxiedSrc, res); 
+});
 
+// ---------------------------------------------------------------------
 // --- WEBSOCKET RÉSZ (Változatlan) ---
+// ---------------------------------------------------------------------
+
 const webClients = new Set(); 
 let authenticatedBot = null; 
+
 wss.on('connection', (ws) => {
-    // ... (wss.on('connection') logika változatlan)
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            // ... (BOT AUTH és PLAY_VIDEO logika változatlan)
+            
             if (data.type === 'AUTH' && data.secret === BOT_SECRET_KEY) {
                 console.log('Discord Bot sikeresen hitelesítve és csatlakozva.');
                 authenticatedBot = ws;
@@ -186,7 +180,10 @@ wss.on('connection', (ws) => {
 });
 
 
+// ---------------------------------------------------------------------
 // --- SZERVER INDÍTÁSA ---
+// ---------------------------------------------------------------------
+
 server.listen(port, () => {
     console.log(`Szaby Lejátszó központ elindult a ${port} porton`);
 });
