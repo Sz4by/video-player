@@ -28,12 +28,14 @@
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
             margin-bottom: 25px;
         }
-        #url_section { display: flex; gap: 10px; }
+        #url_section { display: flex; gap: 10px; flex-wrap: wrap; }
         #url {
             flex-grow: 1; padding: 10px; font-size: 1em;
             border: 1px solid #444; border-radius: 5px;
             background-color: #2a2a2a; color: #f0f0f0;
+            min-width: 200px;
         }
+        /* Play gomb stílusa */
         #btn_play {
             padding: 10px 20px; font-size: 1em; font-weight: bold;
             color: white; background-color: #4a90e2; 
@@ -41,6 +43,17 @@
             transition: background-color 0.3s;
         }
         #btn_play:hover { background-color: #357abd; }
+
+        /* Új ablak gomb stílusa (ZÖLD) */
+        #btn_window {
+            padding: 10px 20px; font-size: 1em; font-weight: bold;
+            color: white; background-color: #28a745;
+            border: none; border-radius: 5px; cursor: pointer;
+            transition: background-color 0.3s;
+            white-space: nowrap;
+        }
+        #btn_window:hover { background-color: #218838; }
+
         #proxy-switch-container {
             margin-top: 15px; display: flex; align-items: center;
             justify-content: center; gap: 8px; color: #ccc;
@@ -71,6 +84,7 @@
         <div id="url_section" name="url_section">
             <input type="text" name="url" id="url" placeholder="Illeszd be a linket..."/>
             <button type="button" name="btn_play" id="btn_play">Play</button>
+            <button type="button" id="btn_window" title="Megnyitás külön ablakban">❐ Új ablak</button>
         </div>
     </form>
     
@@ -87,10 +101,11 @@
     var video = document.getElementById('videoPlayer');
     var urlInput = document.getElementById('url');
     var playButton = document.getElementById('btn_play');
+    var windowButton = document.getElementById('btn_window'); // Gomb referencia
     var statusLight = document.getElementById('status-light');
     var proxyToggle = document.getElementById('proxy-toggle');
 
-    // --- LEJÁTSZÓ FUNKCIÓ ---
+    // --- 1. HELYI LEJÁTSZÁS FUNKCIÓ ---
     function playVideo() {
         var originalUrl = urlInput.value;
         if (!originalUrl) {
@@ -98,11 +113,10 @@
             return;
         }
         
-        // Kiolvassuk a kapcsoló állását
         var useProxy = proxyToggle.checked;
         var finalUrl = useProxy ? `/proxy?url=${encodeURIComponent(originalUrl)}` : originalUrl;
 
-        console.log(`Lejátszás indítása (${useProxy ? 'Proxyval' : 'Közvetlenül'}): ${finalUrl}`);
+        console.log(`Helyi lejátszás indítása (${useProxy ? 'Proxyval' : 'Közvetlenül'}): ${finalUrl}`);
         video.style.display = 'block';
 
         var isHls = originalUrl.includes('.m3u8') || originalUrl.includes('.txt');
@@ -111,53 +125,64 @@
             hls.destroy();
         }
 
-        // Ha az ÚJ videó HLS és a böngésző támogatja:
         if (isHls && Hls.isSupported()) {
-            
             hls = new Hls(); 
-            
             hls.loadSource(finalUrl);
             hls.attachMedia(video);
-            
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 video.play();
             });
-
             hls.on(Hls.Events.ERROR, function (event, data) {
-                if (data.fatal) {
-                    console.error('Végzetes HLS hiba:', data);
-                }
+                if (data.fatal) { console.error('Végzetes HLS hiba:', data); }
             });
-
         } else {
-            // Ha nem HLS (pl. MP4), vagy a HLS nem támogatott:
             video.src = finalUrl;
             video.play();
         }
     }
 
     playButton.addEventListener("click", playVideo);
+
+    // --- 2. ÚJ ABLAK FUNKCIÓ ---
+    windowButton.addEventListener("click", function() {
+        var originalUrl = urlInput.value;
+        if (!originalUrl) {
+            alert("Kérlek, adj meg egy URL-t!");
+            return;
+        }
+
+        // Megnézzük, kértek-e proxy-t a checkboxszal
+        var useProxy = proxyToggle.checked;
+
+        // Ha proxy kell: /proxy-link/URL
+        // Ha NEM kell: /direct-link/URL
+        var routePrefix = useProxy ? '/proxy-link/' : '/direct-link/';
+        
+        // Teljes URL összeállítása (pl. https://te-oldalad.com/direct-link/https://video.mp4)
+        var finalOpenUrl = window.location.origin + routePrefix + originalUrl;
+        
+        console.log(`Ablak nyitása: ${finalOpenUrl}`);
+        window.open(finalOpenUrl, '_blank');
+    });
     
-    // --- WEBSOCKET CSATLAKOZÁS ---
+    // --- 3. WEBSOCKET CSATLAKOZÁS ---
     function connectWebSocket() {
         const wsProtocol = (location.protocol === 'https:' ? 'wss:' : 'ws:');
         const wsUrl = wsProtocol + '//' + location.host; 
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = function() {
-            console.log('WebSocket csatlakozva a szerverhez.');
-            statusLight.style.backgroundColor = '#0f0'; // Zöld
-            statusLight.title = 'Csatlakozva a mindenttudóhoz';
+            console.log('WebSocket csatlakozva.');
+            statusLight.style.backgroundColor = '#0f0'; 
+            statusLight.title = 'Csatlakozva';
         };
 
         ws.onmessage = function(event) {
             try {
                 const data = JSON.parse(event.data);
-                console.log('Üzenet érkezett a szerverről:', data);
-
                 if (data.type === 'PLAY_VIDEO' && data.url) {
                     urlInput.value = data.url; 
-                    proxyToggle.checked = data.useProxy;
+                    proxyToggle.checked = data.useProxy; // Szinkronizáljuk a proxy kapcsolót is
                     playVideo(); 
                 }
             } catch (e) {
@@ -166,15 +191,8 @@
         };
 
         ws.onclose = function() {
-            console.log('WebSocket kapcsolat bontva. Újracsatlakozás 3 másodperc múlva...');
-            statusLight.style.backgroundColor = '#f00'; // Piros
-            statusLight.title = 'Kapcsolat bontva';
+            statusLight.style.backgroundColor = '#f00';
             setTimeout(connectWebSocket, 3000);
-        };
-
-        ws.onerror = function(err) {
-            console.error('WebSocket hiba:', err);
-            ws.close();
         };
     }
     
