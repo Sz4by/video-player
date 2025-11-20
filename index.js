@@ -18,20 +18,21 @@ const wss = new WebSocket.Server({ server });
 const port = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------
-// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY ---
+// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY (JAVÍTOTT - HLS TÁMOGATÁSSAL) ---
 // ---------------------------------------------------------------------
 
-// Létrehozza a fekete hátterű, videót tartalmazó HTML oldalt
 function generateMinimalPlayerHtml(finalSrc, res) {
     if (!finalSrc || !finalSrc.startsWith('http')) {
         return res.status(400).send("Hiányzó vagy érvénytelen videó link az útvonal után.");
     }
     
+    // Ez a HTML most már tartalmazza a HLS.js könyvtárat és a logikát
     const minimalHtml = `
     <!DOCTYPE html>
     <html>
     <head>
         <title>Lejátszás - Szaby</title>
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
         <style>
             body { 
                 background-color: #000; margin: 0; display: flex; 
@@ -43,12 +44,45 @@ function generateMinimalPlayerHtml(finalSrc, res) {
         </style>
     </head>
     <body>
-        <video id="videoPlayer" controls autoplay src="${finalSrc}"></video>
+        <video id="videoPlayer" controls autoplay></video>
+        
         <script>
             const video = document.getElementById('videoPlayer');
-            video.addEventListener('loadeddata', () => {
-                 video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
-            });
+            const src = "${finalSrc}";
+
+            // Ellenőrizzük, hogy támogatott-e a HLS
+            if (Hls.isSupported()) {
+                console.log('HLS támogatott, motor indítása...');
+                const hls = new Hls();
+                hls.loadSource(src);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.play().catch(e => console.log('Autoplay blokkolva:', e));
+                });
+                
+                // Hibakezelés: ha a HLS nem megy, megpróbáljuk natívan (hátha MP4)
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        console.warn('HLS hiba, váltás natív lejátszásra:', data);
+                        hls.destroy();
+                        video.src = src;
+                        video.play();
+                    }
+                });
+            } 
+            // Safari vagy iOS esetében, ahol natív a HLS
+            else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = src;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play();
+                });
+            } 
+            // Végső esetben sima videóként kezeljük
+            else {
+                video.src = src;
+                video.play();
+            }
         </script>
     </body>
     </html>
@@ -109,28 +143,26 @@ app.get('/proxy', async (req, res) => {
 // --- ÚTVONALAK ÉS ROUTING ---
 // ---------------------------------------------------------------------
 
-// 1. A FŐOLDAL (HTML ŰRLAP) KISZOLGÁLÁSA
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 2. ÚTVONAL: PROXY NÉLKÜL (Direkt lejátszáshoz)
-// Formátum: https://[RENDER CÍMED]/direct-link/https://videolink.mp4
+// 2. ÚTVONAL: PROXY NÉLKÜL (Most már HLS támogatással!)
 app.get('/direct-link/*', (req, res) => {
     const fullVideoLink = req.params[0];
     generateMinimalPlayerHtml(fullVideoLink, res); 
 });
 
-// 3. ÚTVONAL: PROXYVAL (Korlátozott linkekhez)
-// Formátum: https://[RENDER CÍMED]/proxy-link/https://videolink.mp4
+// 3. ÚTVONAL: PROXYVAL
 app.get('/proxy-link/*', (req, res) => {
     const fullVideoLink = req.params[0];
+    // Itt a finalSrc maga a proxy útvonal lesz
     const proxiedSrc = `/proxy?url=${encodeURIComponent(fullVideoLink)}`; 
     generateMinimalPlayerHtml(proxiedSrc, res); 
 });
 
 // ---------------------------------------------------------------------
-// --- WEBSOCKET RÉSZ (Változatlan) ---
+// --- WEBSOCKET RÉSZ ---
 // ---------------------------------------------------------------------
 
 const webClients = new Set(); 
@@ -149,7 +181,6 @@ wss.on('connection', (ws) => {
             }
 
             if (ws.isBot && data.type === 'PLAY_VIDEO') {
-                console.log(`[BOT] Play parancs továbbítása: ${data.url}`);
                 webClients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN) {
                         client.send(JSON.stringify(data));
@@ -163,23 +194,16 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         if (ws.isBot) {
-            console.log('Discord Bot lecsatlakozott.');
             authenticatedBot = null;
         } else {
             webClients.delete(ws);
-            console.log(`Web kliens lecsatlakozott. Maradt: ${webClients.size}`);
         }
     });
 
     if (!ws.isBot) {
         webClients.add(ws);
-        console.log(`Web kliens csatlakozott. Jelenleg: ${webClients.size}`);
     }
 });
-
-// ---------------------------------------------------------------------
-// --- SZERVER INDÍTÁSA ---
-// ---------------------------------------------------------------------
 
 server.listen(port, () => {
     console.log(`Szaby Lejátszó központ elindult a ${port} porton`);
