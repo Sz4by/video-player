@@ -49,8 +49,6 @@ function generateMinimalPlayerHtml(finalSrc, res) {
             video.addEventListener('loadeddata', () => {
                  video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
             });
-            // Hogy a teljes képernyő gomb könnyen elérhető legyen a videó vezérlőkkel:
-            // document.documentElement.requestFullscreen().catch(e => { ... }); 
         </script>
     </body>
     </html>
@@ -178,7 +176,6 @@ wss.on('connection', (ws) => {
         console.log(`Web kliens csatlakozott. Jelenleg: ${webClients.size}`);
     }
 });
-
 
 // ---------------------------------------------------------------------
 // --- SZERVER INDÍTÁSA ---
