@@ -34,13 +34,25 @@
             border: 1px solid #444; border-radius: 5px;
             background-color: #2a2a2a; color: #f0f0f0;
         }
-        #btn_play {
+        
+        /* Gombok stílusa */
+        button {
             padding: 10px 20px; font-size: 1em; font-weight: bold;
-            color: white; background-color: #4a90e2; 
             border: none; border-radius: 5px; cursor: pointer;
-            transition: background-color 0.3s;
+            transition: background-color 0.3s; color: white;
+        }
+
+        #btn_play {
+            background-color: #4a90e2; 
         }
         #btn_play:hover { background-color: #357abd; }
+
+        /* Új ablak gomb stílusa */
+        #btn_new_window {
+            background-color: #9013fe;
+        }
+        #btn_new_window:hover { background-color: #710ec9; }
+
         #proxy-switch-container {
             margin-top: 15px; display: flex; align-items: center;
             justify-content: center; gap: 8px; color: #ccc;
@@ -70,7 +82,12 @@
     <form name="frm1" id="frm1" onsubmit="return false;">
         <div id="url_section" name="url_section">
             <input type="text" name="url" id="url" placeholder="Illeszd be a linket..."/>
+            
             <button type="button" name="btn_play" id="btn_play">Play</button>
+            
+            <button type="button" id="btn_new_window" title="Megnyitás teljes ablakban">
+                &#x2197; Új ablak
+            </button>
         </div>
     </form>
     
@@ -87,10 +104,11 @@
     var video = document.getElementById('videoPlayer');
     var urlInput = document.getElementById('url');
     var playButton = document.getElementById('btn_play');
+    var newWindowButton = document.getElementById('btn_new_window');
     var statusLight = document.getElementById('status-light');
     var proxyToggle = document.getElementById('proxy-toggle');
 
-    // --- LEJÁTSZÓ FUNKCIÓ ---
+    // --- HELYI LEJÁTSZÓ FUNKCIÓ ---
     function playVideo() {
         var originalUrl = urlInput.value;
         if (!originalUrl) {
@@ -98,7 +116,6 @@
             return;
         }
         
-        // Kiolvassuk a kapcsoló állását
         var useProxy = proxyToggle.checked;
         var finalUrl = useProxy ? `/proxy?url=${encodeURIComponent(originalUrl)}` : originalUrl;
 
@@ -111,11 +128,8 @@
             hls.destroy();
         }
 
-        // Ha az ÚJ videó HLS és a böngésző támogatja:
         if (isHls && Hls.isSupported()) {
-            
             hls = new Hls(); 
-            
             hls.loadSource(finalUrl);
             hls.attachMedia(video);
             
@@ -130,13 +144,36 @@
             });
 
         } else {
-            // Ha nem HLS (pl. MP4), vagy a HLS nem támogatott:
             video.src = finalUrl;
             video.play();
         }
     }
 
+    // --- ÚJ ABLAKBAN MEGNYITÁS FUNKCIÓ ---
+    function openInNewWindow() {
+        var originalUrl = urlInput.value.trim();
+        if (!originalUrl) {
+            alert("Kérlek, adj meg egy URL-t!");
+            return;
+        }
+
+        var useProxy = proxyToggle.checked;
+        var baseUrl = window.location.origin; // Pl. http://localhost:3000
+        var targetUrl;
+
+        // Eldöntjük, melyik útvonalat használjuk
+        if (useProxy) {
+            targetUrl = `${baseUrl}/proxy-link/${originalUrl}`;
+        } else {
+            targetUrl = `${baseUrl}/direct-link/${originalUrl}`;
+        }
+
+        // Új ablak/fül megnyitása
+        window.open(targetUrl, '_blank');
+    }
+
     playButton.addEventListener("click", playVideo);
+    newWindowButton.addEventListener("click", openInNewWindow);
     
     // --- WEBSOCKET CSATLAKOZÁS ---
     function connectWebSocket() {
@@ -146,7 +183,7 @@
 
         ws.onopen = function() {
             console.log('WebSocket csatlakozva a szerverhez.');
-            statusLight.style.backgroundColor = '#0f0'; // Zöld
+            statusLight.style.backgroundColor = '#0f0'; 
             statusLight.title = 'Csatlakozva a mindenttudóhoz';
         };
 
@@ -167,7 +204,7 @@
 
         ws.onclose = function() {
             console.log('WebSocket kapcsolat bontva. Újracsatlakozás 3 másodperc múlva...');
-            statusLight.style.backgroundColor = '#f00'; // Piros
+            statusLight.style.backgroundColor = '#f00'; 
             statusLight.title = 'Kapcsolat bontva';
             setTimeout(connectWebSocket, 3000);
         };
