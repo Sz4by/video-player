@@ -18,7 +18,7 @@ const wss = new WebSocket.Server({ server });
 const port = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------
-// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY ---
+// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY (TELJES ABLAKOS) ---
 // ---------------------------------------------------------------------
 
 // Létrehozza a fekete hátterű, videót tartalmazó HTML oldalt
@@ -32,13 +32,24 @@ function generateMinimalPlayerHtml(finalSrc, res) {
     <html>
     <head>
         <title>Lejátszás - Szaby</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body { 
-                background-color: #000; margin: 0; display: flex; 
-                justify-content: center; align-items: center; 
-                height: 100vh; width: 100vw; overflow: hidden;
+                background-color: #000; 
+                margin: 0; 
+                padding: 0;
+                width: 100vw; 
+                height: 100vh; 
+                overflow: hidden; /* Görgetősáv eltüntetése */
+                display: flex;
+                justify-content: center; 
+                align-items: center; 
             }
-            video { max-width: 100%; max-height: 100vh; }
+            video { 
+                width: 100%; 
+                height: 100%; 
+                object-fit: contain; /* Aránytartó kitöltés */
+            }
             video:focus, video:active { outline: none; border: none; }
         </style>
     </head>
@@ -49,8 +60,6 @@ function generateMinimalPlayerHtml(finalSrc, res) {
             video.addEventListener('loadeddata', () => {
                  video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
             });
-            // Hogy a teljes képernyő gomb könnyen elérhető legyen a videó vezérlőkkel:
-            // document.documentElement.requestFullscreen().catch(e => { ... }); 
         </script>
     </body>
     </html>
