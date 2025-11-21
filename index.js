@@ -4,9 +4,13 @@ const path = require('path');
 const http = require('http');
 const { URL } = require('url');
 const WebSocket = require('ws');
+const fs = require('fs');
 
 // --- BIZTONSÁGI KULCS ---
 const BOT_SECRET_KEY = process.env.BOT_SECRET_KEY;
+if (!BOT_SECRET_KEY) {
+    console.warn('FIGYELEM: A BOT_SECRET_KEY nincs beállítva!');
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -14,8 +18,50 @@ const wss = new WebSocket.Server({ server });
 const port = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------
-// --- PROXY FUNKCIÓ (EZ MARAD, EZ A LÉNYEG) ---
+// --- MINIMALISTA HTML GENERÁLÓ SEGÉDFÜGGVÉNY ---
 // ---------------------------------------------------------------------
+
+// Létrehozza a fekete hátterű, videót tartalmazó HTML oldalt
+function generateMinimalPlayerHtml(finalSrc, res) {
+    if (!finalSrc || !finalSrc.startsWith('http')) {
+        return res.status(400).send("Hiányzó vagy érvénytelen videó link az útvonal után.");
+    }
+    
+    const minimalHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Lejátszás - Szaby</title>
+        <style>
+            body { 
+                background-color: #000; margin: 0; display: flex; 
+                justify-content: center; align-items: center; 
+                height: 100vh; width: 100vw; overflow: hidden;
+            }
+            video { max-width: 100%; max-height: 100vh; }
+            video:focus, video:active { outline: none; border: none; }
+        </style>
+    </head>
+    <body>
+        <video id="videoPlayer" controls autoplay src="${finalSrc}"></video>
+        <script>
+            const video = document.getElementById('videoPlayer');
+            video.addEventListener('loadeddata', () => {
+                 video.play().catch(e => console.log('Autoplay blokkolva. Kattintson a lejátszáshoz!'));
+            });
+            // Hogy a teljes képernyő gomb könnyen elérhető legyen a videó vezérlőkkel:
+            // document.documentElement.requestFullscreen().catch(e => { ... }); 
+        </script>
+    </body>
+    </html>
+    `;
+    res.send(minimalHtml);
+}
+
+// ---------------------------------------------------------------------
+// --- A PROXY RÉSZ (CORS/Referer kikerülése) ---
+// ---------------------------------------------------------------------
+
 app.get('/proxy', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('Hiányzó "url" paraméter');
@@ -32,7 +78,6 @@ app.get('/proxy', async (req, res) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': origin
     };
-
     try {
         let response = await axios.get(videoUrl, {
             responseType: isManifest ? 'text' : 'stream',
@@ -63,38 +108,81 @@ app.get('/proxy', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
-// --- ALAP ÚTVONAL ---
+// --- ÚTVONALAK ÉS ROUTING ---
 // ---------------------------------------------------------------------
+
+// 1. A FŐOLDAL (HTML ŰRLAP) KISZOLGÁLÁSA
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// 2. ÚTVONAL: PROXY NÉLKÜL (Direkt lejátszáshoz)
+// Formátum: https://[RENDER CÍMED]/direct-link/https://videolink.mp4
+app.get('/direct-link/*', (req, res) => {
+    const fullVideoLink = req.params[0];
+    generateMinimalPlayerHtml(fullVideoLink, res); 
+});
+
+// 3. ÚTVONAL: PROXYVAL (Korlátozott linkekhez)
+// Formátum: https://[RENDER CÍMED]/proxy-link/https://videolink.mp4
+app.get('/proxy-link/*', (req, res) => {
+    const fullVideoLink = req.params[0];
+    const proxiedSrc = `/proxy?url=${encodeURIComponent(fullVideoLink)}`; 
+    generateMinimalPlayerHtml(proxiedSrc, res); 
 });
 
 // ---------------------------------------------------------------------
 // --- WEBSOCKET RÉSZ (Változatlan) ---
 // ---------------------------------------------------------------------
+
 const webClients = new Set(); 
+let authenticatedBot = null; 
 
 wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            
             if (data.type === 'AUTH' && data.secret === BOT_SECRET_KEY) {
+                console.log('Discord Bot sikeresen hitelesítve és csatlakozva.');
+                authenticatedBot = ws;
                 ws.isBot = true;
                 return;
             }
+
             if (ws.isBot && data.type === 'PLAY_VIDEO') {
+                console.log(`[BOT] Play parancs továbbítása: ${data.url}`);
                 webClients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN) {
                         client.send(JSON.stringify(data));
                     }
                 });
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Ismeretlen WebSocket üzenet:', message);
+        }
     });
-    
-    if (!ws.isBot) webClients.add(ws);
-    ws.on('close', () => { if (!ws.isBot) webClients.delete(ws); });
+
+    ws.on('close', () => {
+        if (ws.isBot) {
+            console.log('Discord Bot lecsatlakozott.');
+            authenticatedBot = null;
+        } else {
+            webClients.delete(ws);
+            console.log(`Web kliens lecsatlakozott. Maradt: ${webClients.size}`);
+        }
+    });
+
+    if (!ws.isBot) {
+        webClients.add(ws);
+        console.log(`Web kliens csatlakozott. Jelenleg: ${webClients.size}`);
+    }
 });
+
+
+// ---------------------------------------------------------------------
+// --- SZERVER INDÍTÁSA ---
+// ---------------------------------------------------------------------
 
 server.listen(port, () => {
     console.log(`Szaby Lejátszó központ elindult a ${port} porton`);
